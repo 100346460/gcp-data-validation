@@ -39,11 +39,11 @@ class TestPubSubMessage(unittest.TestCase):
             {u'station':u'011990-99999', u'temp': 0, u'time': 1433269388}
         ]
     
-        create_dummy_avro_file_locally(local_path='tests/weather4.avro', 
+        create_dummy_avro_file_locally(local_path='tests/weather7.avro', 
                                         schema=schema_avro, 
                                         records=weather_records)
 
-        copy_file_to_bucket('tests/weather4.avro', 'test_data_validation', 'weather4.avro')
+        copy_file_to_bucket('tests/weather7.avro', 'test_data_validation', 'weather7.avro')
         print("Finished copying")
 
         subscriber = pubsub_v1.SubscriberClient()
@@ -53,7 +53,7 @@ class TestPubSubMessage(unittest.TestCase):
         with subscriber:
             try:
                 print("trying to streaming pull future")
-                results = streaming_pull_future.result(timeout=5.0)
+                streaming_pull_future.result(timeout=9.0)
             except TimeoutError:
                 streaming_pull_future.cancel()
                 streaming_pull_future.result()
