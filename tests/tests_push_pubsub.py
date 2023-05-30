@@ -1,15 +1,15 @@
-from google.cloud import functions_v1
-from google.oauth2 import service_account
 from fastavro import parse_schema, writer
-from google.cloud import logging
+from google.cloud import logging, bigquery
 import unittest
 import os
 
+PROJECT_ID = "sacred-truck-387712"
 PUBSUB_TOPIC = "my-topic"
 BUCKET = "test_data_validation_bucket"
 FUNCTION_FOLDER_NAME = "data-validation"
 FUNCTION_NAME = "process_object" # folder name containing main.py
 CLOUD_FUNCTION_NAME = "data_validation_func"
+GCS_BUCKET = "gs://test_data_validation_bucket"
 
 
 def check_function_execution_status(project_id, function_name):
@@ -36,9 +36,34 @@ def check_function_execution_status(project_id, function_name):
         else:
             print("Cloud Function is currently being executed.")
 
+def create_external_table_from_avro_file(client: bigquery.Client) -> None:
+    # example uses the weather#.avro file
+    # Define the SQL statement
+    sql_statement = f'''
+    CREATE EXTERNAL TABLE `sacred-truck-387712.data_validation.weather`
+    (
+        station STRING,
+        time TIMESTAMP,
+        temp INT64
+    )
+    OPTIONS (
+        format='AVRO',
+        uris=['{GCS_BUCKET}/*']
+    )
+    '''
 
+    # Execute the SQL statement
+    job = client.query(sql_statement)
+    job.result()  # Wait for the job to complete
 
-
+    print("External table created successfully.")
+    
+def full_table_query_validation(client: bigquery.Client,
+                                full_table_id: str) -> None:
+    sql_statement = f"SELECT * FROM `{full_table_id}`"
+    job = client.query(sql_statement)
+    job.result()
+    print("Able to query the entire table")
 
 def read_cloud_function_logs(project_id:str, function_name:str):
     # Initialize the Logging client
@@ -67,7 +92,9 @@ def copy_file_to_bucket(local_path: str,
                         gcs_file_path: str) -> None:
     os.system(f"gsutil cp {local_path} gs://{bucket}/{gcs_file_path}")
 
-
+def drop_external_table(client:bigquery.Client, full_table_id:str) -> None:
+    os.system(f"bq rm -f {full_table_id}")
+    
 class TestPubSubPushCloudFunction(unittest.TestCase):
     def create_topic_and_cloud_function(self) -> None:
         os.system(f"gcloud pubsub topics create {PUBSUB_TOPIC}")
@@ -94,12 +121,27 @@ class TestPubSubPushCloudFunction(unittest.TestCase):
                 {'name':'temp', 'type':'int'}
             ],
         }
+        self.schema_avro_namespace_issue = {
+            'doc': 'a weather reading',
+            'name': 'Weather',
+            'namespace': ' ',
+            'type': 'record',
+            'fields': [
+                {'name':'station', 'type':'string'},
+                {'name':'time', 'type':'long'},
+                {'name':'temp', 'type':'int'}
+            ],
+        }
 
         self.weather_records = [
             {u'station':u'011990-99999', u'temp': 0, u'time': 1433269388}
         ]
 
     def test_create_new_object_in_bucket(self):
+        
+        client = bigquery.Client()
+        drop_external_table(client, "sacred-truck-387712:data_validation.weather")   
+        
         file_name = "weather12.avro"
         create_dummy_avro_file_locally(local_path=f'tests/{file_name}', 
                                         schema=self.schema_avro, 
@@ -111,5 +153,20 @@ class TestPubSubPushCloudFunction(unittest.TestCase):
         #check_function_execution_status(project_id="sacred-truck-387712",
         #                            function_name=CLOUD_FUNCTION_NAME)
                                                                         
-        read_cloud_function_logs(project_id="sacred-truck-387712",
-                                 function_name=CLOUD_FUNCTION_NAME)
+        #read_cloud_function_logs(project_id="sacred-truck-387712",
+        #                         function_name=CLOUD_FUNCTION_NAME)
+        
+        create_external_table_from_avro_file(client)
+        full_table_query_validation(client, "sacred-truck-387712.data_validation.weather")
+        
+        file_name="weather_bad_namespace.avro"
+        
+        create_dummy_avro_file_locally(local_path=f'tests/{file_name}', 
+                                        schema=self.schema_avro_namespace_issue, 
+                                        records=self.weather_records)
+        
+        copy_file_to_bucket(f'tests/{file_name}', BUCKET, file_name)
+        full_table_query_validation(client, "sacred-truck-387712.data_validation.weather")
+        
+              
+        
