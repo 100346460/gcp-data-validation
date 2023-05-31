@@ -1,6 +1,5 @@
 from fastavro import parse_schema, writer
 from google.cloud import logging, bigquery
-<<<<<<< HEAD
 from google.cloud import storage
 from google.api_core.exceptions import BadRequest
 import unittest
@@ -11,11 +10,9 @@ import os
 # try visualizing in Looker
 
 
-=======
 import unittest
 import os
 
->>>>>>> b6c94243f527df65d2a977dcd285c1dcc9b4f201
 PROJECT_ID = "sacred-truck-387712"
 PUBSUB_TOPIC = "my-topic"
 BUCKET = "test_data_validation_bucket"
@@ -23,7 +20,7 @@ FUNCTION_FOLDER_NAME = "cf-data-validation"
 FUNCTION_NAME = "process_object" # folder name containing main.py
 CLOUD_FUNCTION_NAME = "data_validation_func"
 GCS_BUCKET = "gs://test_data_validation_bucket"
-<<<<<<< HEAD
+
 
 
 
@@ -43,8 +40,7 @@ def delete_all_bucket_contents(bucket_name:str):
         blob.delete()
 
     print(f"All contents in the bucket '{bucket_name}' have been cleared.")
-=======
->>>>>>> b6c94243f527df65d2a977dcd285c1dcc9b4f201
+
 
 
 def check_function_execution_status(project_id, function_name):
@@ -95,7 +91,7 @@ def create_external_table_from_avro_file(client: bigquery.Client) -> None:
     
 def full_table_query_validation(client: bigquery.Client,
                                 full_table_id: str) -> None:
-<<<<<<< HEAD
+
     try:
         sql_statement = f"SELECT * FROM `{full_table_id}`"
         job = client.query(sql_statement)
@@ -104,12 +100,7 @@ def full_table_query_validation(client: bigquery.Client,
         if "invalid namespace" in str(e).lower():
             print("Message some type of alert for namespace issue") 
         raise BadRequest(f"Error Message:{str(e)}")
-=======
-    sql_statement = f"SELECT * FROM `{full_table_id}`"
-    job = client.query(sql_statement)
-    job.result()
-    print("Able to query the entire table")
->>>>>>> b6c94243f527df65d2a977dcd285c1dcc9b4f201
+
 
 def read_cloud_function_logs(project_id:str, function_name:str):
     # Initialize the Logging client
@@ -184,16 +175,9 @@ class TestPubSubPushCloudFunction(unittest.TestCase):
         ]
 
     def test_create_new_object_in_bucket(self):
-<<<<<<< HEAD
         delete_all_bucket_contents(BUCKET)
         client = bigquery.Client()
         drop_external_table(client, "sacred-truck-387712:data_validation.weather")   
-=======
-        
-        client = bigquery.Client()
-        drop_external_table(client, "sacred-truck-387712:data_validation.weather")   
-        
->>>>>>> b6c94243f527df65d2a977dcd285c1dcc9b4f201
         file_name = "weather12.avro"
         local_path = f'tests/data/{file_name}'
         
@@ -220,12 +204,9 @@ class TestPubSubPushCloudFunction(unittest.TestCase):
                                         records=self.weather_records)
         
         copy_file_to_bucket(f'tests/{file_name}', BUCKET, file_name)
-<<<<<<< HEAD
         with self.assertRaises(BadRequest):
             full_table_query_validation(client, "sacred-truck-387712.data_validation.weather")
-=======
-        full_table_query_validation(client, "sacred-truck-387712.data_validation.weather")
->>>>>>> b6c94243f527df65d2a977dcd285c1dcc9b4f201
+
         
               
         
