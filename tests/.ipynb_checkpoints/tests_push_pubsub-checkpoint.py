@@ -1,5 +1,7 @@
 from fastavro import parse_schema, writer
 from google.cloud import logging, bigquery
+from google.cloud import storage
+from google.api_core.exceptions import BadRequest
 import unittest
 import os
 
@@ -10,6 +12,25 @@ FUNCTION_FOLDER_NAME = "data-validation"
 FUNCTION_NAME = "process_object" # folder name containing main.py
 CLOUD_FUNCTION_NAME = "data_validation_func"
 GCS_BUCKET = "gs://test_data_validation_bucket"
+
+
+
+
+def delete_all_bucket_contents(bucket_name:str):
+    # Create a storage client
+    client = storage.Client()
+
+    # Get the bucket reference
+    bucket = client.get_bucket(bucket_name)
+
+    # List all blobs in the bucket
+    blobs = bucket.list_blobs()
+
+    # Delete each blob in the bucket
+    for blob in blobs:
+        blob.delete()
+
+    print(f"All contents in the bucket '{bucket_name}' have been cleared.")
 
 
 def check_function_execution_status(project_id, function_name):
@@ -60,10 +81,14 @@ def create_external_table_from_avro_file(client: bigquery.Client) -> None:
     
 def full_table_query_validation(client: bigquery.Client,
                                 full_table_id: str) -> None:
-    sql_statement = f"SELECT * FROM `{full_table_id}`"
-    job = client.query(sql_statement)
-    job.result()
-    print("Able to query the entire table")
+    try:
+        sql_statement = f"SELECT * FROM `{full_table_id}`"
+        job = client.query(sql_statement)
+        job.result()
+    except BadRequest as e:
+        if "invalid namespace" in str(e).lower():
+            print("Message some type of alert for namespace issue") 
+        raise BadRequest(f"Error Message:{str(e)}")
 
 def read_cloud_function_logs(project_id:str, function_name:str):
     # Initialize the Logging client
@@ -138,16 +163,17 @@ class TestPubSubPushCloudFunction(unittest.TestCase):
         ]
 
     def test_create_new_object_in_bucket(self):
-        
+        delete_all_bucket_contents(BUCKET)
         client = bigquery.Client()
         drop_external_table(client, "sacred-truck-387712:data_validation.weather")   
-        
         file_name = "weather12.avro"
-        create_dummy_avro_file_locally(local_path=f'tests/{file_name}', 
+        local_path = f'tests/data/{file_name}'
+        
+        create_dummy_avro_file_locally(local_path=local_path, 
                                         schema=self.schema_avro, 
                                         records=self.weather_records)
         
-        copy_file_to_bucket(f'tests/{file_name}', BUCKET, file_name)
+        copy_file_to_bucket(local_path, BUCKET, file_name)
 
 
         #check_function_execution_status(project_id="sacred-truck-387712",
@@ -166,7 +192,8 @@ class TestPubSubPushCloudFunction(unittest.TestCase):
                                         records=self.weather_records)
         
         copy_file_to_bucket(f'tests/{file_name}', BUCKET, file_name)
-        full_table_query_validation(client, "sacred-truck-387712.data_validation.weather")
+        with self.assertRaises(BadRequest):
+            full_table_query_validation(client, "sacred-truck-387712.data_validation.weather")
         
               
         
