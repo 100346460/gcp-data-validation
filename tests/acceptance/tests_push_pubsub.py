@@ -1,6 +1,6 @@
-from data_validation.repository.bigquery import full_table_query_validation, drop_external_table, Message, Warning
-from data_validation.repository.gcs import delete_all_bucket_contents
-
+from data_validation.repository.bigquery import full_table_query_validation, drop_table, Message, Warning
+from data_validation.repository.gcs import delete_all_bucket_contents, create_buckets_by_name, delete_buckets_by_name
+from data_validation.services.pub_sub import create_pubsub_topic, delete_pubsub_topic, create_object_change_notification
 
 from fastavro import parse_schema, writer
 from google.cloud import logging, bigquery
@@ -96,7 +96,6 @@ def copy_file_to_bucket(local_path: str,
     os.system(f"gsutil cp {local_path} gs://{bucket}/{gcs_file_path}")
 
 
-    
 class TestPubSubPushCloudFunction(unittest.TestCase):
     def create_topic_and_cloud_function(self) -> None:
         os.system(f"gcloud pubsub topics create {PUBSUB_TOPIC}")
@@ -178,6 +177,38 @@ class TestPubSubPushCloudFunction(unittest.TestCase):
                                      expected)
         self.assertEquals(expected.level, actual.level)
         self.assertEquals(expected.full_table_id, actual.full_table_id)
+        
+        
+    def test_given_multiple_buckets_with_data_creates_one_topic_two_push_subs(self):
+        # create buckets
+        client = storage.Client()
+        bucket_names = ["test_dv_1", "test_dv_2"]
+        delete_buckets_by_name(client, bucket_names)
+        create_buckets_by_name(client, bucket_names)      
+        # create 1 topic  
+        pubsub_topic = "test_data_validation_multiple_subscribers_topic"
+        create_pubsub_topic(pubsub_topic)
+        # create multiple push subscribers
+        for bucket_name in bucket_names:
+            create_object_change_notification(pubsub_topic,
+                                              bucket_name)
+        # populate buckets with data
+        file_name = "weather12.avro"
+        local_path = f'tests/acceptance/data/{file_name}'
+        
+        create_dummy_avro_file_locally(local_path=local_path, 
+                                        schema=self.schema_avro, 
+                                        records=self.weather_records)
+        copy_file_to_bucket(local_path, bucket_name, file_name)
+        
+        
+        # very that notification has been pushed to subscriber
+        # delete buckets
+        
+        delete_buckets_by_name(client, bucket_names)
+        
+        
+
         
               
         
