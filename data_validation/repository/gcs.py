@@ -7,8 +7,12 @@ def delete_all_bucket_contents(bucket_name:str):
     client = storage.Client()
 
     # Get the bucket reference
-    bucket = client.get_bucket(bucket_name)
-
+    try:
+        bucket = client.get_bucket(bucket_name)
+    except NotFound as e:
+        print(f"Bucket {bucket_name} does not exist")
+        return 
+        
     # List all blobs in the bucket
     blobs = bucket.list_blobs()
 

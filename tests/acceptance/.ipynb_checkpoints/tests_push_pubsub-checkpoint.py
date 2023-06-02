@@ -1,6 +1,12 @@
-from data_validation.repository.bigquery import full_table_query_validation, drop_table, Message, Warning
+from data_validation.repository.bigquery import full_table_query_validation, drop_table, Message, Warning 
+from data_validation.repository.bigquery import create_log_table_for_Messages, insert_message_into_bigquery
+
+
+
 from data_validation.repository.gcs import delete_all_bucket_contents, create_buckets_by_name, delete_buckets_by_name
-from data_validation.services.pub_sub import create_pubsub_topic, create_object_change_notification
+from data_validation.services.pub_sub import create_pubsub_topic, delete_pubsub_topic, create_object_change_notification
+
+from data_validation.services.cloud_functions import create_cloud_function_from_file_creation
 
 from fastavro import parse_schema, writer
 from google.cloud import logging, bigquery
@@ -45,7 +51,8 @@ def check_function_execution_status(project_id, function_name):
         else:
             print("Cloud Function is currently being executed.")
 
-def create_external_table_from_avro_file(client: bigquery.Client) -> None:
+def create_external_table_from_avro_file(client: bigquery.Client,
+                                          gcs_bucket:str) -> None:
     # example uses the weather#.avro file
     # Define the SQL statement
     sql_statement = f'''
@@ -104,7 +111,8 @@ class TestPubSubPushCloudFunction(unittest.TestCase):
                     --runtime python310 \
                     --trigger-topic {PUBSUB_TOPIC} \
                     --entry-point {FUNCTION_NAME} \
-                    --source {FUNCTION_FOLDER_NAME}")
+                    --source {FUNCTION_FOLDER_NAME} \
+                    --use-deprecated")
 
         os.system(f"gsutil notification create -t {PUBSUB_TOPIC} -f json -e OBJECT_FINALIZE gs://{BUCKET}")
 
@@ -182,21 +190,42 @@ class TestPubSubPushCloudFunction(unittest.TestCase):
     def test_given_multiple_buckets_with_data_creates_one_topic_two_push_subs(self):
         # create buckets
         client = storage.Client()
-        bucket_names = ["test_dv_1", "test_dv_2"]
-        delete_buckets_by_name(client, bucket_names)
-        create_buckets_by_name(client, bucket_names)      
+        bqclient = bigquery.Client()
+        bucket_names = ["test_dv_1"]
+        #for bucket_name in bucket_names:
+        #    delete_all_bucket_contents(bucket_name)
+        #delete_buckets_by_name(client, bucket_names)
+        #create_buckets_by_name(client, bucket_names)      
         # create 1 topic  
-        pubsub_topic = "test_data_validation_multiple_subscribers_topic"
-        create_pubsub_topic(pubsub_topic)
-        # create multiple push subscribers
-        for bucket_name in bucket_names:
-            create_object_change_notification(pubsub_topic,
-                                              bucket_name)
-        # populate buckets with data
-        # very that notification has been pushed to subscriber
+        #pubsub_topic = "test_data_validation_multiple_subscribers_topic"
+        #create_pubsub_topic(pubsub_topic)
+        create_log_table_for_Messages(
+              bqclient,
+             full_table_id = "sacred-truck-387712.data_validation.message_log")
+        for index, bucket_name in enumerate(bucket_names):
+       
+            create_cloud_function_from_file_creation(
+                bucket_name=bucket_name,
+                function_name=FUNCTION_NAME,
+                cloud_function_name=f"{CLOUD_FUNCTION_NAME}_{bucket_name}",
+                function_folder_name="data_validation")
+      
+            #create file
+            file_name = f"weather{index + 80}.avro"
+            local_path = f'tests/acceptance/data/{file_name}'
+
+            create_dummy_avro_file_locally(local_path=local_path, 
+                                            schema=self.schema_avro, 
+                                            records=self.weather_records)
+            copy_file_to_bucket(local_path, bucket_name, file_name)
+    
+    
+    
         # delete buckets
+        #for bucket_name in bucket_names:
+        #    delete_all_bucket_contents(bucket_name)
         
-        delete_buckets_by_name(client, bucket_names)
+        #delete_buckets_by_name(client, bucket_names)
         
         
 

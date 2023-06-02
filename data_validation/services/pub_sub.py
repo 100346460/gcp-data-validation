@@ -10,3 +10,5 @@ def create_object_change_notification(pubsub_topic: str,
                                       bucket_name: str) -> None:
     '''creates a push notification when a new object is landed within a gcs bucket'''
     os.system(f"gsutil notification create -t {pubsub_topic} -f json -e OBJECT_FINALIZE gs://{bucket_name}")
+    
+    
