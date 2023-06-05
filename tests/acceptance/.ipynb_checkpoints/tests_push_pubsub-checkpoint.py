@@ -6,13 +6,16 @@ from data_validation.repository.bigquery import create_log_table_for_Messages, i
 from data_validation.repository.gcs import delete_all_bucket_contents, create_buckets_by_name, delete_buckets_by_name
 from data_validation.services.pub_sub import create_pubsub_topic, delete_pubsub_topic, create_object_change_notification
 
-from data_validation.services.cloud_functions import create_cloud_function_from_file_creation
+from data_validation.services.cloud_functions import create_cloud_function_from_file_creation, delete_cloud_function
 
 from fastavro import parse_schema, writer
 from google.cloud import logging, bigquery
 from google.api_core.exceptions import BadRequest
 from google.cloud import storage
+from typing import List
 import unittest
+import time
+import random
 import os
 
 # Write the status to a BigQuery table
@@ -101,6 +104,7 @@ def copy_file_to_bucket(local_path: str,
                         bucket: str,
                         gcs_file_path: str) -> None:
     os.system(f"gsutil cp {local_path} gs://{bucket}/{gcs_file_path}")
+    print(f"Copying file {local_path} to bucket")
 
 
 class TestPubSubPushCloudFunction(unittest.TestCase):
@@ -187,48 +191,102 @@ class TestPubSubPushCloudFunction(unittest.TestCase):
         self.assertEquals(expected.full_table_id, actual.full_table_id)
         
         
-    def test_given_multiple_buckets_with_data_creates_one_topic_two_push_subs(self):
-        # create buckets
-        client = storage.Client()
-        bqclient = bigquery.Client()
-        bucket_names = ["test_dv_1"]
-        #for bucket_name in bucket_names:
-        #    delete_all_bucket_contents(bucket_name)
+class TestCloudFunctions(unittest.TestCase):
+    def setUp(self):
+        self.schema_avro = {
+            'doc': 'a weather reading',
+            'name': 'Weather',
+            'namespace': 'test',
+            'type': 'record',
+            'fields': [
+                {'name':'station', 'type':'string'},
+                {'name':'time', 'type':'long'},
+                {'name':'temp', 'type':'int'}
+            ],
+        }
+        self.schema_avro_namespace_issue = {
+            'doc': 'a weather reading',
+            'name': 'Weather',
+            'namespace': ' ',
+            'type': 'record',
+            'fields': [
+                {'name':'station', 'type':'string'},
+                {'name':'time', 'type':'long'},
+                {'name':'temp', 'type':'int'}
+            ],
+        }
+
+        self.weather_records = [
+            {u'station':u'011990-99999', u'temp': 0, u'time': 1433269388}
+        ]
+        
+    def setUpBuckets(self, client: storage.Client, bucket_names: List[str]) -> None:
+        for bucket_name in bucket_names:
+            delete_all_bucket_contents(bucket_name)
+        delete_buckets_by_name(client, bucket_names)
+        create_buckets_by_name(client, bucket_names) 
+        
+        
+    def tearDownBuckets(self, bucket_names: List[str]) -> None:
+        # delete buckets
+        for bucket_name in bucket_names:
+            delete_all_bucket_contents(bucket_name)
+        
         #delete_buckets_by_name(client, bucket_names)
-        #create_buckets_by_name(client, bucket_names)      
-        # create 1 topic  
-        #pubsub_topic = "test_data_validation_multiple_subscribers_topic"
-        #create_pubsub_topic(pubsub_topic)
-        create_log_table_for_Messages(
-              bqclient,
-             full_table_id = "sacred-truck-387712.data_validation.message_log")
+        
+    def create_cloud_functions(self, bucket_names: list[str]) -> None:
+        
         for index, bucket_name in enumerate(bucket_names):
-       
+            cloud_function_name = f"{CLOUD_FUNCTION_NAME}_{bucket_name}"
+            delete_cloud_function(cloud_function_name,
+                                  project=PROJECT_ID,
+                                  region="us-central1")
             create_cloud_function_from_file_creation(
                 bucket_name=bucket_name,
                 function_name=FUNCTION_NAME,
-                cloud_function_name=f"{CLOUD_FUNCTION_NAME}_{bucket_name}",
+                cloud_function_name=cloud_function_name,
                 function_folder_name="data_validation")
-      
+            
+    def test_given_new_file_landed_in_bucket_generates_logs_to_bigquery_table(self):
+        # create buckets
+        client = storage.Client()
+        bqclient = bigquery.Client()
+        bucket_names = ["test_dv_1","test_dv_2"]
+        log_table_id = "sacred-truck-387712.data_validation.message_log"
+
+        # create buckets
+        self.setUpBuckets(client, bucket_names)
+
+        # create log table
+        drop_table(log_table_id)
+        create_log_table_for_Messages(
+              bqclient,
+             full_table_id = log_table_id)
+
+        # create cloud functions
+        self.create_cloud_functions(bucket_names)
+            
+        # update buckets with weather data
+        for index,bucket_name in enumerate(bucket_names):
             #create file
-            file_name = f"weather{index + 80}.avro"
+            file_name = f"weather_{index}.avro"
             local_path = f'tests/acceptance/data/{file_name}'
 
             create_dummy_avro_file_locally(local_path=local_path, 
                                             schema=self.schema_avro, 
                                             records=self.weather_records)
             copy_file_to_bucket(local_path, bucket_name, file_name)
+        #wait for cloud functions to finish executing
+        time.sleep(30)
     
-    
-    
-        # delete buckets
-        #for bucket_name in bucket_names:
-        #    delete_all_bucket_contents(bucket_name)
+        rows = bqclient.query(f"SELECT * FROM `{log_table_id}`").result()
+        for row in rows:
+            print(row)
+        self.assertEquals(rows.total_rows, 2)
         
-        #delete_buckets_by_name(client, bucket_names)
+        # remove buckets
+        #self.tearDownbuckets(bucket_names)
+        # remove cloud functions
         
-        
-
-        
-              
-        
+        # delete log table
+        drop_table(log_table_id)

@@ -64,3 +64,4 @@ def insert_message_into_bigquery(client: bigquery.Client,
         
 def drop_table(full_table_id:str) -> None:
     os.system(f"bq rm -f {full_table_id}")
+    print(f"dropped table: {full_table_id}")

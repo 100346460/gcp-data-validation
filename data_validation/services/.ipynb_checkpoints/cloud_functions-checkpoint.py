@@ -19,4 +19,5 @@ def delete_cloud_function(
     cloud_function_name: str,
     project: str,
     region: str) -> None:
-    os.system(f"""gcloud functions delete {cloud_function_name} --project {project} --region {region}""")
+    os.system(f"""gcloud functions delete {cloud_function_name} --project {project} --region {region} --quiet""")
+    print(f"deleted cloud function: {cloud_function_name}")
